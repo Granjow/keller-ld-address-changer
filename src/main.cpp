@@ -2,7 +2,7 @@
 #include <Wire.h>
 
 #define LD_OLD_ADDR 61
-#define LD_NEW_ADDR 62
+#define LD_NEW_ADDR 63
 
 #define LD_ADDR_MASK 0b1111111
 
@@ -44,8 +44,8 @@ bool isValidAddress(int address) {
 BitChanges checkBitChanges(uint8_t oldAddress, uint8_t newAddress) {
     BitChanges bc{};
     for (int i = 0; i < 7; i++) {
-        bool oldBit = oldAddress & 1;
-        bool newBit = newAddress & 1;
+        bool oldBit = (oldAddress >> i) & 1;
+        bool newBit = (newAddress >> i) & 1;
         if (oldBit && !newBit) {
             bc.toZero++;
         } else if (!oldBit && newBit) {
@@ -77,26 +77,70 @@ uint8_t readAddress(uint8_t i2cAddress) {
     return loAddress;
 }
 
+void enterCommandMode(uint8_t i2cAddress){
+    Wire.beginTransmission(i2cAddress);
+    Wire.write(COMMAND_MODE);
+    Wire.endTransmission();
+}
+
 void enterNormalMode(uint8_t i2cAddress) {
     Wire.beginTransmission(i2cAddress);
     Wire.write(NORMAL_MODE);
     Wire.endTransmission();
 }
 
+void printBitChanges(BitChanges changes) {
+    Serial.print(changes.toZero);
+    Serial.print(F(" to 0, "));
+    Serial.print(changes.toOne);
+    Serial.print(F(" to 1\n"));
+}
+
+// Poor man's unit tests :)
+bool runUnitTests() {
+    bool success = true;
+
+    auto changes = checkBitChanges(0b0000000, 0b1111111);
+    if (changes.toOne != 7 || changes.toZero != 0) {
+        printBitChanges(changes);
+        Serial.print("Bit checker check 1 failed\n");
+        success = false;
+    }
+
+    changes = checkBitChanges(0b1111000, 0b0000111);
+    if (changes.toOne != 3 || changes.toZero != 4) {
+        printBitChanges(changes);
+        Serial.print("Bit checker check 2 failed\n");
+        success = false;
+    }
+
+    return success;
+}
+
 void setup() {
+    Serial.begin(38400);
+    Serial.println(F("Address Changer for Keller LD sensors initialising ..."));
+
     uint8_t oldAddress = LD_OLD_ADDR;
     uint8_t newAddress = LD_NEW_ADDR;
+
+    auto unitTestsSucceeded = runUnitTests();
+    if (!unitTestsSucceeded) {
+        Serial.print(F("Self test failed. Quitting.\n"));
+        return;
+    }
+
 
     Serial.println(F("Address Changer for Keller LD sensors ready."));
     Serial.print(F("Current address: 0x"));
     Serial.print(oldAddress, HEX);
     Serial.print(F("\nNew address: 0x"));
     Serial.print(newAddress, HEX);
-    Serial.print(F("\nBinary form:\nOld: "));
+    Serial.print(F("\nBinary form:\n"));
     Serial.print(oldAddress, BIN);
-    Serial.print(F("\nNew: "));
+    Serial.print(F(" (old)\n"));
     Serial.print(newAddress, BIN);
-    Serial.println();
+    Serial.print(F(" (new)\n"));
 
     /////////////////
     // Address checks
@@ -143,8 +187,10 @@ void setup() {
 
     Serial.println("Would write new address now!");
     // (not actually writing for now)
+    enterCommandMode(oldAddress);
     // writeNewAddress(oldAddress, newAddress);
 
+    // Entering normal mode does not update the address.
     enterNormalMode(oldAddress);
 
     uint8_t updatedAddress = readAddress(oldAddress);
